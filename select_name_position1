@@ -1,0 +1,150 @@
+import fitz  # PyMuPDF
+from PIL import Image, ImageTk
+import tkinter as tk
+import os
+import json
+
+TEMPLATE_PDF = 'invitation.pdf'  # change if needed
+OUTPUT_JSON = 'name_position.json'
+
+if not os.path.exists(TEMPLATE_PDF):
+    print(f"Template PDF '{TEMPLATE_PDF}' not found in project root. Put your invitation PDF there and run this script.")
+    raise SystemExit(1)
+
+# Load first page as image
+doc = fitz.open(TEMPLATE_PDF)
+page = doc.load_page(0)
+mat = fitz.Matrix(2, 2)  # render at higher resolution for easier clicking
+pix = page.get_pixmap(matrix=mat)
+img_data = pix.tobytes('png')
+
+# Create temp image file
+tmp_img = 'tmp_invitation_page.png'
+with open(tmp_img, 'wb') as f:
+    f.write(img_data)
+
+# Tkinter UI to pick a point
+root = tk.Tk()
+root.title('Click where the name should appear')
+
+pil_img = Image.open(tmp_img)
+width, height = pil_img.size
+canvas = tk.Canvas(root, width=width, height=height)
+canvas.pack()
+
+# Keep a copy of the original PIL image for redraws
+orig_pil_img = pil_img.copy()
+tk_img = ImageTk.PhotoImage(pil_img)
+image_on_canvas = canvas.create_image(0, 0, anchor='nw', image=tk_img)
+
+coords_text = tk.StringVar()
+coords_text.set('Click on the image to select coordinates\nUse arrow keys for 1-pixel adjustments')
+label = tk.Label(root, textvariable=coords_text)
+label.pack()
+
+# Entry for preview name
+preview_frame = tk.Frame(root)
+preview_frame.pack(pady=6)
+tk.Label(preview_frame, text='Preview name:').pack(side='left')
+preview_name_var = tk.StringVar(value='Recipient')
+preview_entry = tk.Entry(preview_frame, textvariable=preview_name_var)
+preview_entry.pack(side='left')
+
+selected = {'x': None, 'y': None}
+
+def update_preview():
+    """Redraw the canvas image with the sample name at the selected point."""
+    name = preview_name_var.get().strip()
+    pil_copy = orig_pil_img.copy()
+    draw = ImageDraw.Draw(pil_copy)
+    # Use a reasonably large font (we rendered at 2x)
+    try:
+        font = ImageFont.truetype('arial.ttf', 96)
+    except Exception:
+        font = ImageFont.load_default()
+
+    if selected['x'] is not None and selected['y'] is not None and name:
+        x = selected['x']
+        y = selected['y']
+        text = f"Dear {name},"
+        # Draw a semi-transparent white box behind text for readability
+        try:
+            text_w, text_h = draw.textsize(text, font=font)
+            box_margin = 8
+            box_coords = [x - text_w/2 - box_margin, y - text_h/2 - box_margin,
+                          x + text_w/2 + box_margin, y + text_h/2 + box_margin]
+            draw.rectangle(box_coords, fill=(255,255,255,200))
+        except Exception:
+            pass
+        draw.text((x, y), text, font=font, fill=(72,72,72), anchor='mm')
+
+    # Update the PhotoImage on the canvas
+    new_tk = ImageTk.PhotoImage(pil_copy)
+    canvas.itemconfig(image_on_canvas, image=new_tk)
+    # prevent GC
+    canvas.image = new_tk
+
+def on_click(event):
+    x = event.x
+    y = event.y
+    selected['x'] = x
+    selected['y'] = y
+    coords_text.set(f'Selected: x={x}, y={y} (on image rendered at 2x scale)')
+    update_preview()
+    # Ensure canvas has focus for key events
+    canvas.focus_set()
+
+def on_arrow_key(event):
+    if selected['x'] is None:
+        return
+    
+    delta = 1  # 1 pixel movement
+    if event.keysym == 'Left':
+        selected['x'] -= delta
+    elif event.keysym == 'Right':
+        selected['x'] += delta
+    elif event.keysym == 'Up':
+        selected['y'] -= delta
+    elif event.keysym == 'Down':
+        selected['y'] += delta
+    
+    coords_text.set(f'Selected: x={selected["x"]}, y={selected["y"]} (on image rendered at 2x scale)')
+    update_preview()
+
+canvas.bind('<Button-1>', on_click)
+canvas.bind('<Left>', on_arrow_key)
+canvas.bind('<Right>', on_arrow_key)
+canvas.bind('<Up>', on_arrow_key)
+canvas.bind('<Down>', on_arrow_key)
+
+def save_and_exit():
+    if selected['x'] is None:
+        print('No point selected. Please click on the image first.')
+        return
+    # Convert coordinates back to PDF space (we used 2x render scale)
+    pdf_x = selected['x'] / 2.0
+    pdf_y = selected['y'] / 2.0
+    data = {'x': pdf_x, 'y': pdf_y}
+    with open(OUTPUT_JSON, 'w') as f:
+        json.dump(data, f)
+    print(f"Saved name position to {OUTPUT_JSON}: {data}")
+    root.destroy()
+
+btn_frame = tk.Frame(root)
+btn_frame.pack(pady=6)
+btn = tk.Button(btn_frame, text='Save coordinates', command=save_and_exit)
+btn.pack(side='left', padx=6)
+
+# Live preview update when typing name
+def on_name_change(event):
+    update_preview()
+
+preview_entry.bind('<KeyRelease>', on_name_change)
+
+root.mainloop()
+
+# Clean up temp image
+try:
+    os.remove(tmp_img)
+except Exception:
+    pass

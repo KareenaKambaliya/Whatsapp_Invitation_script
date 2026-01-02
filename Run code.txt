@@ -1,0 +1,26 @@
+Full flow — create personalized invitation (image → PDF) and send with attachment + personalized message:
+python whatsapp_sender.py --excel contacts.xlsx
+
+
+This is the default: it will create the invitation (if missing), preview (unless you pass --no-preview), and send.
+
+Skip preview and send automatically:
+
+python whatsapp_sender.py --excel contacts.xlsx --no-preview
+
+
+Create only (generate images + PDFs, do not send):
+python whatsapp_sender.py --create-only --excel contacts.xlsx
+
+Send-only (do not create PDFs; use existing PDFs in invitations):
+python whatsapp_sender.py --send-only --excel contacts.xlsx --no-preview
+
+
+Send only personalized text messages (no attachment):
+
+python whatsapp_sender.py --send-message-only --excel contacts.xlsx
+
+
+Or use the separate focused script (already patched for the paste flow):
+
+python whatsapp_message_sender.py --excel contacts.xlsx
